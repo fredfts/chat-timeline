@@ -11,25 +11,15 @@ import importlib.resources as resources
 import json
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from chat_timeline.paths import find_project_root, find_timeline_home
 
 GITIGNORE_OPEN = "# >>> chat-timeline >>>"
 GITIGNORE_CLOSE = "# <<< chat-timeline <<<"
-GITIGNORE_BODY = (
-    "/timeline/__pycache__/\n"
-    "/timeline/.precommit_state.json\n"
-)
-TIMELINE_GITIGNORE = (
-    "/__pycache__/\n"
-    "\n"
-    "/chats\n"
-    "/sessions\n"
-    "/contents\n"
-    ".precommit_state.json\n"
-)
+GITIGNORE_BODY = "/timeline/__pycache__/\n/timeline/.precommit_state.json\n"
+TIMELINE_GITIGNORE = "/__pycache__/\n\n/chats\n/sessions\n/contents\n.precommit_state.json\n"
 PRECOMMIT_STATE_DEFAULT = {
     "enabled": False,
     "last_run_ts": 0,
@@ -43,8 +33,7 @@ def _print(msg: str) -> None:
 
 
 def _ensure_dirs(home: Path) -> None:
-    for sub in ("", "chats", "chats/staged", "chats/used",
-                "sessions", "contents", "timeline"):
+    for sub in ("", "chats", "chats/staged", "chats/used", "sessions", "contents", "timeline"):
         (home / sub).mkdir(parents=True, exist_ok=True)
     _print(f"directories ready under {home}")
 
@@ -68,10 +57,7 @@ def _ship_llm_instructions(home: Path) -> None:
 def _update_project_gitignore(project_root: Path, home_rel: str) -> None:
     """Idempotently maintain a managed block in <project>/.gitignore."""
     gitignore = project_root / ".gitignore"
-    body = (
-        f"/{home_rel}/__pycache__/\n"
-        f"/{home_rel}/.precommit_state.json\n"
-    )
+    body = f"/{home_rel}/__pycache__/\n/{home_rel}/.precommit_state.json\n"
     block = f"{GITIGNORE_OPEN}\n{body}{GITIGNORE_CLOSE}\n"
     if not gitignore.exists():
         gitignore.write_text(block, encoding="utf-8")
@@ -125,11 +111,13 @@ def _parse_init_args(argv: Sequence[str]) -> argparse.Namespace:
         description="Scaffold this project for chat-timeline.",
     )
     parser.add_argument(
-        "--no-git", action="store_true",
+        "--no-git",
+        action="store_true",
         help="Allow init outside a git repository (skips hook install).",
     )
     parser.add_argument(
-        "--no-hook", action="store_true",
+        "--no-hook",
+        action="store_true",
         help="Skip pre-commit hook installation.",
     )
     return parser.parse_args(list(argv))
@@ -156,8 +144,7 @@ def run_init(argv: Sequence[str]) -> None:
     _print(f"timeline home: {home}")
 
     _ensure_dirs(home)
-    _write_if_missing(home / ".gitignore", TIMELINE_GITIGNORE,
-                      label="timeline/.gitignore")
+    _write_if_missing(home / ".gitignore", TIMELINE_GITIGNORE, label="timeline/.gitignore")
     _write_if_missing(
         home / ".precommit_state.json",
         json.dumps(PRECOMMIT_STATE_DEFAULT, indent=2) + "\n",
@@ -178,6 +165,7 @@ def run_init(argv: Sequence[str]) -> None:
         os.environ.setdefault("TIMELINE_PROJECT_ROOT", str(project_root))
         os.environ.setdefault("TIMELINE_HOME", str(home))
         from chat_timeline._legacy.main import _install_hook  # noqa: WPS433
+
         _install_hook()
         hook_installed = True
 
@@ -214,6 +202,7 @@ def run_deinit(argv: Sequence[str]) -> None:
     os.environ.setdefault("TIMELINE_PROJECT_ROOT", str(project_root))
     os.environ.setdefault("TIMELINE_HOME", str(home))
     from chat_timeline._legacy.main import _uninstall_hook  # noqa: WPS433
+
     _uninstall_hook()
     _remove_project_gitignore_block(project_root)
     _print("done. output data preserved under " + str(home))

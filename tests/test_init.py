@@ -15,8 +15,7 @@ from chat_timeline.init_cmd import (
 
 
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=str(cwd), check=True,
-                   capture_output=True)
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True)
 
 
 def _make_repo(tmp_path: Path) -> Path:
@@ -36,8 +35,7 @@ def test_init_scaffolds_directories_and_files(tmp_path, monkeypatch):
 
     home = repo / "timeline"
     assert home.is_dir()
-    for sub in ("chats", "chats/staged", "chats/used",
-                "sessions", "contents", "timeline"):
+    for sub in ("chats", "chats/staged", "chats/used", "sessions", "contents", "timeline"):
         assert (home / sub).is_dir(), sub
 
     assert (home / ".gitignore").is_file()
@@ -65,8 +63,7 @@ def test_init_is_idempotent(tmp_path, monkeypatch):
 
     run_init([])
     # User-owned files should not be clobbered on re-run.
-    (repo / "timeline" / "LLM_INSTRUCTIONS.md").write_text(
-        "custom content", encoding="utf-8")
+    (repo / "timeline" / "LLM_INSTRUCTIONS.md").write_text("custom content", encoding="utf-8")
     run_init([])
 
     assert (repo / "timeline" / "LLM_INSTRUCTIONS.md").read_text() == "custom content"

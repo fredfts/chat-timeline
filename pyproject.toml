@@ -71,20 +71,18 @@ include = [
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+# Skip the vendored legacy module from both `ruff check` and `ruff format`
+# until the v0.2.0 refactor splits it into smaller files.
+extend-exclude = ["src/chat_timeline/_legacy"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
-ignore = [
-  "E501",  # line length — legacy module exceeds 100; deal with in v0.2.0
-  "E402",  # module-level imports after path setup
-  "E741",  # ambiguous single-letter names in legacy code
-]
-
-[tool.ruff.lint.per-file-ignores]
-"src/chat_timeline/_legacy/*.py" = ["ALL"]
 
 [tool.mypy]
-python_version = "3.9"
+# Runtime supports Python 3.9; mypy itself requires >=3.10, so we analyze
+# the package against 3.10 syntax rules. Anything 3.9-incompatible would
+# still fail at install time via `requires-python`.
+python_version = "3.10"
 files = ["src/chat_timeline"]
 ignore_missing_imports = true
 # Skip legacy until v0.2.0 refactor.

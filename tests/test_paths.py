@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
@@ -10,8 +9,7 @@ from chat_timeline.paths import find_project_root, find_timeline_home
 
 
 def _git(cwd: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=str(cwd), check=True,
-                   capture_output=True)
+    subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True)
 
 
 def test_find_project_root_uses_git_toplevel(tmp_path, monkeypatch):
