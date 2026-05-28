@@ -98,6 +98,13 @@ Nothing is transmitted anywhere. Everything runs locally on your machine.
 | `TIMELINE_HOME` | Override the default `<project>/timeline` location. |
 | `TIMELINE_AMEND` | Set by the pre-commit hook on `git commit --amend`. |
 
+### Scan cache
+
+To keep wide-scope scans fast, parsed Codex session metadata is cached
+under `<TIMELINE_HOME>/.cache/sessions/codex/<sha1>.json`, keyed by JSONL
+mtime + size. The cache is regenerated on demand — safe to delete, and
+already covered by the managed `.gitignore` block.
+
 ---
 
 ## Pre-commit hook details
@@ -115,10 +122,10 @@ On Windows it runs under Git Bash (which ships with Git for Windows).
 
 ## Status
 
-v0.1.0 ships a working CLI based on a vendored monolithic implementation
-(`chat_timeline._legacy`). v0.2.0 will split it into clean modules
-(`sources/`, `tui/`, `session.py`, `timeline.py`) without breaking the CLI or
-the on-disk format.
+v0.2.0 ships the modular layout (`sources/`, `tui/`, `markdown.py`,
+`git_utils.py`, `session.py`, `timeline.py`, `precommit.py`, `app.py`,
+`_state.py`) with no `_legacy/` block — the CLI and on-disk format are
+unchanged from v0.1.x.
 
 ---
 

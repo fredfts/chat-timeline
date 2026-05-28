@@ -17,7 +17,7 @@ import sys
 import time as _time
 from pathlib import Path
 
-from chat_timeline._legacy.main import (
+from chat_timeline._state import (
     HISTORY_DIR_NAME,
     HOOK_PATH,
     PRECOMMIT_STATE,
@@ -255,7 +255,7 @@ def _run_standalone():
     # Deferred imports: each of these triggers loading another sibling
     # module. Resolving at call time keeps module-load order simple and
     # mirrors the pattern used by sources/ and tui/.
-    from chat_timeline._legacy.main import _collect_chats
+    from chat_timeline.app import _collect_chats
     from chat_timeline.session import generate_session
     from chat_timeline.timeline import (
         chat_used_state_path,

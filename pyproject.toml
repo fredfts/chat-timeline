@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chat-timeline"
-version = "0.1.1"
+version = "0.2.0"
 description = "Export Cursor / Claude Code / Codex chats and build a git-tracked, LLM-friendly project timeline."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -71,9 +71,6 @@ include = [
 [tool.ruff]
 line-length = 100
 target-version = "py39"
-# Skip the vendored legacy module from both `ruff check` and `ruff format`
-# until the v0.2.0 refactor splits it into smaller files.
-extend-exclude = ["src/chat_timeline/_legacy"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
@@ -85,5 +82,3 @@ select = ["E", "F", "W", "I", "B", "UP"]
 python_version = "3.10"
 files = ["src/chat_timeline"]
 ignore_missing_imports = true
-# Skip legacy until v0.2.0 refactor.
-exclude = ["src/chat_timeline/_legacy/"]

@@ -373,16 +373,17 @@ def interactive_select(chats, exporters=None, reset_mode=False):
     Returns (selected_indices, deselected_fps, old_enabled, hot_only,
              explicit_select_fps).
     """
-    # Pipeline + state helpers still live in _legacy.main for now; defer
-    # their import so picking up tui.selector doesn't freeze legacy
-    # module-level paths (see sources/cursor.py for the same pattern).
-    from chat_timeline._legacy.main import (
-        _collect_archive_dedup_data,
+    # Pipeline + state helpers — deferred so picking up tui.selector doesn't
+    # load all the generator modules unless we actually enter the TUI.
+    from chat_timeline.precommit import (
         _get_modified_chats,
         _install_hook,
         _load_precommit_state,
         _save_precommit_state,
         _uninstall_hook,
+    )
+    from chat_timeline.timeline import (
+        _collect_archive_dedup_data,
         chat_used_state_path,
         get_chat_entries,
         load_used_state,

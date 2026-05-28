@@ -17,11 +17,7 @@ from chat_timeline.markdown import (
     iso_to_dt,
     sanitize_filename,
 )
-
-# STAGED_DIR + export_chat_markdown live in _legacy.main and bind PROJECT_DIR
-# at module-load time. Importing them at the top would freeze HOOK_PATH before
-# `timeline init` gets a chance to set TIMELINE_PROJECT_ROOT. They're only
-# needed by export_single_chat, so the import is deferred.
+from chat_timeline.markdown import export_chat_markdown as _md_export_chat_markdown
 
 SOURCE_NAME = "Cursor"
 UUID_RE = re.compile(
@@ -600,7 +596,10 @@ def build_conversation(cd, bubble_map):
 
 def export_single_chat(chat, include_tool_params=False):
     """Export one Cursor chat to STAGED_DIR and return the file path."""
-    from chat_timeline._legacy.main import STAGED_DIR, export_chat_markdown
+    from chat_timeline._state import PROJECT_DIR, STAGED_DIR
+
+    def export_chat_markdown(meta, turns, include_tool_params=False):
+        return _md_export_chat_markdown(meta, turns, include_tool_params, project_root=PROJECT_DIR)
 
     composer_id = chat["composerId"]
     name = chat.get("name", "(unnamed)")

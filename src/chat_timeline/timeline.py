@@ -13,7 +13,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from chat_timeline._legacy.main import (
+from chat_timeline._state import (
     CONTENTS_DIR,
     HISTORY_DIR,
     HISTORY_DIR_NAME,

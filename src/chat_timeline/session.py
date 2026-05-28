@@ -10,7 +10,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from chat_timeline._legacy.main import (
+from chat_timeline._state import (
     PROJECT_DIR,
     SESSIONS_DIR,
     STAGED_DIR,

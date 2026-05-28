@@ -13,8 +13,7 @@ from chat_timeline.markdown import (
     iso_to_dt,
     sanitize_filename,
 )
-
-# See sources/cursor.py for why the _legacy.main import is deferred.
+from chat_timeline.markdown import export_chat_markdown as _md_export_chat_markdown
 
 SOURCE_NAME = "Claude"
 SYSTEM_USER_PREFIXES = (
@@ -555,7 +554,10 @@ def build_conversation(messages, session_dir: Path):
 
 def export_single_chat(chat, include_tool_params=False):
     """Export one Claude Code conversation to STAGED_DIR and return the file path."""
-    from chat_timeline._legacy.main import STAGED_DIR, export_chat_markdown
+    from chat_timeline._state import PROJECT_DIR, STAGED_DIR
+
+    def export_chat_markdown(meta, turns, include_tool_params=False):
+        return _md_export_chat_markdown(meta, turns, include_tool_params, project_root=PROJECT_DIR)
 
     jsonl_path = chat["_jsonl_path"]
     session_id = chat["_session_id"]

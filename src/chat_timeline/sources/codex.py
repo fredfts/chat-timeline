@@ -14,9 +14,9 @@ from chat_timeline.markdown import (
     iso_to_dt,
     sanitize_filename,
 )
+from chat_timeline.markdown import export_chat_markdown as _md_export_chat_markdown
+from chat_timeline.markdown import relative_path as _md_relative_path
 from chat_timeline.sources._cache import JSONLCache
-
-# See sources/cursor.py for why the _legacy.main imports are deferred.
 
 SOURCE_NAME = "Codex"
 SYSTEM_USER_PREFIXES = ("<environment_context>",)
@@ -165,7 +165,10 @@ def _paths_overlap(path, project_candidates):
 
 
 def _relative_workspace_path(path):
-    from chat_timeline._legacy.main import relative_path
+    from chat_timeline._state import PROJECT_DIR
+
+    def relative_path(p):
+        return _md_relative_path(p, PROJECT_DIR)
 
     raw = str(path or "")
     if not raw:
@@ -736,7 +739,10 @@ def build_conversation(messages):
 
 def export_single_chat(chat, include_tool_params=False):
     """Export one Codex conversation to STAGED_DIR and return the file path."""
-    from chat_timeline._legacy.main import STAGED_DIR, export_chat_markdown
+    from chat_timeline._state import PROJECT_DIR, STAGED_DIR
+
+    def export_chat_markdown(meta, turns, include_tool_params=False):
+        return _md_export_chat_markdown(meta, turns, include_tool_params, project_root=PROJECT_DIR)
 
     jsonl_path = chat["_jsonl_path"]
     session_id = chat.get("_session_id", "")
