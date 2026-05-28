@@ -718,7 +718,7 @@ def _uninstall_hook():
     if not HOOK_PATH.exists():
         return
     content = HOOK_PATH.read_text(encoding="utf-8", errors="replace")
-    # Strip both current and legacy section markers
+    # Strip current + legacy section markers from any appended-block install.
     new_content = content
     for marker_open, marker_close in (
         ("# --- timeline pre-commit ---", "# --- end timeline pre-commit ---"),
@@ -728,6 +728,29 @@ def _uninstall_hook():
             new_content = re.sub(
                 rf"\n*{re.escape(marker_open)}\n.*?{re.escape(marker_close)}\n?",
                 "", new_content, flags=re.DOTALL)
+
+    # Standalone-hook detection on the post-strip content. Legacy hooks split
+    # `SCRIPT="$TOPLEVEL/timeline/main.py"` from `python3 "$SCRIPT" -x` across
+    # lines, so a literal `timeline/main.py -x` never appears — match the path
+    # and the flag independently, and also recognise the header comments.
+    has_flag = any(
+        flag in new_content for flag in (" -p\n", " -x\n", ' -p"', ' -x"')
+    )
+    is_standalone = (
+        "# chat-timeline pre-commit hook" in new_content
+        or "# timeline pre-commit hook" in new_content
+        or "timeline -p" in new_content
+        or "python -m chat_timeline -p" in new_content
+        or "python3 -m chat_timeline -p" in new_content
+        or ("timeline/main.py" in new_content and has_flag)
+        or ("history/main.py" in new_content and has_flag)
+    )
+
+    if is_standalone:
+        HOOK_PATH.unlink()
+        print("  pre-commit: hook removed")
+        return
+
     if new_content != content:
         if new_content.strip():
             HOOK_PATH.write_text(new_content, encoding="utf-8")
@@ -735,16 +758,6 @@ def _uninstall_hook():
         else:
             HOOK_PATH.unlink()
             print("  pre-commit: hook removed")
-        return
-    if ("timeline/main.py -p" in content
-            or "timeline/main.py -x" in content
-            or "history/main.py -x" in content
-            or "timeline -p" in content
-            or "python -m chat_timeline -p" in content
-            or "python3 -m chat_timeline -p" in content):
-        # It's our standalone hook
-        HOOK_PATH.unlink()
-        print("  pre-commit: hook removed")
 
 
 def _get_modified_chats(chats, since_ts):

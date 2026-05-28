@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chat-timeline"
-version = "0.1.0"
+version = "0.1.1"
 description = "Export Cursor / Claude Code / Codex chats and build a git-tracked, LLM-friendly project timeline."
 readme = "README.md"
 requires-python = ">=3.9"
