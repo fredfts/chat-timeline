@@ -52,9 +52,9 @@ dev = [
 timeline = "chat_timeline.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/espmfred/chat-timeline"
-Issues = "https://github.com/espmfred/chat-timeline/issues"
-Source = "https://github.com/espmfred/chat-timeline"
+Homepage = "https://github.com/fredfts/chat-timeline"
+Issues = "https://github.com/fredfts/chat-timeline/issues"
+Source = "https://github.com/fredfts/chat-timeline"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/chat_timeline"]

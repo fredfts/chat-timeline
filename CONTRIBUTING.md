@@ -5,7 +5,7 @@ Thanks for your interest. The codebase is small and stdlib-only.
 ## Local setup
 
 ```bash
-git clone https://github.com/espmfred/chat-timeline.git
+git clone https://github.com/fredfts/chat-timeline.git
 cd chat-timeline
 python -m pip install -e ".[dev]"
 pre-commit install
