@@ -2574,7 +2574,16 @@ def _collect_chats(source_names):
 
     Returns (chats, exporters) where each chat has a ``_source`` field
     and exporters maps source name to its export_single_chat function.
+
+    Sources that accept ``cache_dir`` get one under
+    ``<HISTORY_DIR>/.cache/sessions`` so warm scans skip re-parsing
+    matched sessions. Sources that don't accept it (legacy shims) keep
+    working unchanged.
     """
+    import inspect
+
+    cache_root = HISTORY_DIR / ".cache" / "sessions"
+
     all_chats = []
     exporters = {}
 
@@ -2584,7 +2593,15 @@ def _collect_chats(source_names):
             continue
         lc, esc = funcs
         try:
-            chats = lc(PROJECT_DIR)
+            # Only pass cache_dir if the source's list_chats accepts it.
+            kwargs = {}
+            try:
+                sig = inspect.signature(lc)
+                if "cache_dir" in sig.parameters:
+                    kwargs["cache_dir"] = cache_root
+            except (TypeError, ValueError):
+                pass
+            chats = lc(PROJECT_DIR, **kwargs)
         except SystemExit:
             # Source not available (e.g. no workspace/dir found)
             continue

@@ -14,6 +14,7 @@ from chat_timeline.markdown import (
     iso_to_dt,
     sanitize_filename,
 )
+from chat_timeline.sources._cache import JSONLCache
 
 # See sources/cursor.py for why the _legacy.main imports are deferred.
 
@@ -209,6 +210,38 @@ def load_conversation(jsonl_path: Path):
     return messages
 
 
+def _peek_cwd(jsonl_path: Path) -> str:
+    """Cheap pre-scan: read up to the first 2 JSON lines for ``payload.cwd``.
+
+    Codex rollouts almost always lead with a ``session_meta`` record that
+    has ``payload.cwd``. When found, ``list_chats`` can run ``_paths_overlap``
+    *before* the expensive full-file parse. Returns "" if no cwd was visible
+    in the head — callers fall back to today's full-parse behavior in that
+    case, so nothing breaks for older/atypical session formats.
+    """
+    try:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
+            for _ in range(2):
+                line = f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = msg.get("payload", {})
+                if isinstance(payload, dict):
+                    cwd = payload.get("cwd")
+                    if isinstance(cwd, str) and cwd:
+                        return cwd
+    except OSError:
+        pass
+    return ""
+
+
 def _extract_session_id_from_path(jsonl_path: Path):
     match = SESSION_ID_RE.search(jsonl_path.name)
     return match.group(1) if match else ""
@@ -387,14 +420,23 @@ def extract_conversation_metadata(messages, fallback_title="", session_id_hint="
 # ---------------------------------------------------------------------------
 
 
-def list_chats(project_dir: Path, scope: Path | None = None):
+def list_chats(
+    project_dir: Path,
+    scope: Path | None = None,
+    cache_dir: Path | None = None,
+):
     """Return list of chat metadata dicts, sorted newest-first.
 
     ``scope`` narrows the cwd-overlap check without affecting where exports
     land. Defaults to ``project_dir``.
+
+    ``cache_dir``, when given, enables an on-disk metadata cache under
+    ``<cache_dir>/codex/``. Invalidated by JSONL mtime/size, so the worst
+    case (corrupt or stale entry) is one extra parse — same as today.
     """
     match_dir = scope if scope is not None else project_dir
     project_candidates = _project_path_candidates(match_dir)
+    cache = JSONLCache(cache_dir, "codex") if cache_dir is not None else None
 
     chats = []
     for root in codex_storage_roots():
@@ -402,6 +444,22 @@ def list_chats(project_dir: Path, scope: Path | None = None):
         for jsonl_file in _session_files(root):
             sid_hint = _extract_session_id_from_path(jsonl_file)
             idx = index_rows.get(sid_hint.lower(), {}) if sid_hint else {}
+
+            # Phase 1 (cheap): peek at the JSONL head for the cwd. If we get
+            # a definitive non-overlap, skip the full parse — the dominant
+            # cost on wide-scope scans.
+            cwd_hint = _peek_cwd(jsonl_file)
+            if cwd_hint and not _paths_overlap(cwd_hint, project_candidates):
+                continue
+
+            # Phase 2: full parse (or cache hit). The cache stores the chat
+            # dict; on hit we reconstruct it without touching the JSONL body.
+            cached = cache.get(jsonl_file) if cache is not None else None
+            if cached is not None:
+                # Rehydrate the Path serialized as str
+                cached["_jsonl_path"] = Path(cached["_jsonl_path"])
+                chats.append(cached)
+                continue
 
             messages = load_conversation(jsonl_file)
             if not messages:
@@ -431,20 +489,25 @@ def list_chats(project_dir: Path, scope: Path | None = None):
                 file_mtime_ms,
             )
 
-            chats.append(
-                {
-                    "name": meta["title"] or "(unnamed)",
-                    "lastUpdatedAt": updated_ms,
-                    "createdAt": int(first_dt.timestamp() * 1000) if first_dt else 0,
-                    "unifiedMode": "agent",
-                    # Codex-specific fields
-                    "_session_id": meta.get("session_id", ""),
-                    "_jsonl_path": jsonl_file,
-                    "_model": meta.get("model", ""),
-                    "_branch": meta.get("branch", ""),
-                    "_cwd": meta.get("cwd", ""),
-                }
-            )
+            chat = {
+                "name": meta["title"] or "(unnamed)",
+                "lastUpdatedAt": updated_ms,
+                "createdAt": int(first_dt.timestamp() * 1000) if first_dt else 0,
+                "unifiedMode": "agent",
+                # Codex-specific fields
+                "_session_id": meta.get("session_id", ""),
+                "_jsonl_path": jsonl_file,
+                "_model": meta.get("model", ""),
+                "_branch": meta.get("branch", ""),
+                "_cwd": meta.get("cwd", ""),
+            }
+            chats.append(chat)
+
+            if cache is not None:
+                # Serialize Path as str for JSON storage; rehydrated on read.
+                serializable = dict(chat)
+                serializable["_jsonl_path"] = str(jsonl_file)
+                cache.put(jsonl_file, serializable)
 
     # Deduplicate across roots by session id (fallback to file path)
     seen: dict[str, dict] = {}

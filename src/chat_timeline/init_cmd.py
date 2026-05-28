@@ -19,7 +19,9 @@ from chat_timeline.paths import find_project_root, find_timeline_home
 GITIGNORE_OPEN = "# >>> chat-timeline >>>"
 GITIGNORE_CLOSE = "# <<< chat-timeline <<<"
 GITIGNORE_BODY = "/timeline/__pycache__/\n/timeline/.precommit_state.json\n"
-TIMELINE_GITIGNORE = "/__pycache__/\n\n/chats\n/sessions\n/contents\n.precommit_state.json\n"
+TIMELINE_GITIGNORE = (
+    "/__pycache__/\n\n/chats\n/sessions\n/contents\n.precommit_state.json\n/.cache/\n"
+)
 PRECOMMIT_STATE_DEFAULT = {
     "enabled": False,
     "last_run_ts": 0,

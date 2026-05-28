@@ -152,3 +152,95 @@ def test_extract_session_id_from_path():
     p = Path("/tmp/rollout-11111111-1111-1111-1111-111111111111.jsonl")
     assert codex_mod._extract_session_id_from_path(p) == "11111111-1111-1111-1111-111111111111"
     assert codex_mod._extract_session_id_from_path(Path("no-uuid.jsonl")) == ""
+
+
+def test_peek_cwd_returns_from_first_session_meta(tmp_path):
+    p = tmp_path / "session.jsonl"
+    p.write_text(
+        '{"type":"session_meta","payload":{"cwd":"/the/path"}}\n'
+        '{"type":"event_msg","payload":{"type":"user_message","message":"hi"}}\n',
+        encoding="utf-8",
+    )
+    assert codex_mod._peek_cwd(p) == "/the/path"
+
+
+def test_peek_cwd_returns_empty_when_not_in_head(tmp_path):
+    p = tmp_path / "session.jsonl"
+    # cwd not present in the first 2 lines — caller falls back to full parse
+    p.write_text(
+        '{"type":"unrelated","payload":{}}\n'
+        '{"type":"also_unrelated","payload":{}}\n'
+        '{"type":"session_meta","payload":{"cwd":"/buried"}}\n',
+        encoding="utf-8",
+    )
+    assert codex_mod._peek_cwd(p) == ""
+
+
+def test_two_phase_scan_skips_non_overlapping_without_full_parse(codex_root, tmp_path, monkeypatch):
+    """When peek finds a non-overlapping cwd, list_chats must NOT call
+    load_conversation on that file — that's the whole perf win."""
+    project = tmp_path / "myproj"
+    project.mkdir()
+    other = tmp_path / "other"
+    other.mkdir()
+
+    sid_match = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    sid_skip = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    _write_jsonl(
+        codex_root / "sessions" / "2026" / "01" / f"rollout-{sid_match}.jsonl",
+        _session_records(sid_match, str(project)),
+    )
+    _write_jsonl(
+        codex_root / "sessions" / "2026" / "01" / f"rollout-{sid_skip}.jsonl",
+        _session_records(sid_skip, str(other)),
+    )
+
+    parsed = []
+    real_load = codex_mod.load_conversation
+
+    def spy(path):
+        parsed.append(path)
+        return real_load(path)
+
+    monkeypatch.setattr(codex_mod, "load_conversation", spy)
+
+    chats = codex_mod.list_chats(project)
+
+    assert {c["_session_id"] for c in chats} == {sid_match}
+    # Critical: the non-matching session was filtered by peek alone.
+    parsed_names = [p.name for p in parsed]
+    assert f"rollout-{sid_skip}.jsonl" not in parsed_names
+    assert f"rollout-{sid_match}.jsonl" in parsed_names
+
+
+def test_cache_warm_run_avoids_full_parse(codex_root, tmp_path, monkeypatch):
+    """Second list_chats call with the same cache_dir reuses the metadata
+    instead of reparsing the JSONL."""
+    project = tmp_path / "myproj"
+    project.mkdir()
+    sid = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+    _write_jsonl(
+        codex_root / "sessions" / "2026" / "01" / f"rollout-{sid}.jsonl",
+        _session_records(sid, str(project)),
+    )
+    cache_dir = tmp_path / ".cache"
+
+    # Cold: parses once.
+    cold_chats = codex_mod.list_chats(project, cache_dir=cache_dir)
+    assert len(cold_chats) == 1
+    assert cold_chats[0]["_session_id"] == sid
+
+    # Warm: load_conversation MUST NOT fire for this file again.
+    parsed = []
+    real_load = codex_mod.load_conversation
+
+    def spy(path):
+        parsed.append(path)
+        return real_load(path)
+
+    monkeypatch.setattr(codex_mod, "load_conversation", spy)
+
+    warm_chats = codex_mod.list_chats(project, cache_dir=cache_dir)
+    assert len(warm_chats) == 1
+    assert warm_chats[0]["_session_id"] == sid
+    assert all(p.name != f"rollout-{sid}.jsonl" for p in parsed), parsed
