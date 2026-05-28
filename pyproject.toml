@@ -1,0 +1,91 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chat-timeline"
+version = "0.1.0"
+description = "Export Cursor / Claude Code / Codex chats and build a git-tracked, LLM-friendly project timeline."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "Fred" }]
+keywords = [
+  "cursor",
+  "claude-code",
+  "codex",
+  "timeline",
+  "ai",
+  "chat-export",
+  "developer-tools",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Version Control :: Git",
+  "Topic :: Utilities",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.5",
+  "mypy>=1.10",
+  "pre-commit>=3",
+  "build>=1.2",
+]
+
+[project.scripts]
+timeline = "chat_timeline.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/espmfred/chat-timeline"
+Issues = "https://github.com/espmfred/chat-timeline/issues"
+Source = "https://github.com/espmfred/chat-timeline"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chat_timeline"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "src/chat_timeline",
+  "README.md",
+  "LICENSE",
+  "CHANGELOG.md",
+  "pyproject.toml",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+  "E501",  # line length — legacy module exceeds 100; deal with in v0.2.0
+  "E402",  # module-level imports after path setup
+  "E741",  # ambiguous single-letter names in legacy code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/chat_timeline/_legacy/*.py" = ["ALL"]
+
+[tool.mypy]
+python_version = "3.9"
+files = ["src/chat_timeline"]
+ignore_missing_imports = true
+# Skip legacy until v0.2.0 refactor.
+exclude = ["src/chat_timeline/_legacy/"]

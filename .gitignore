@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Editors / IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Test / type-check / lint caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Tools
+.tox/
+.nox/
+venv/
+.venv/
+env/
+
+# Local-only state
+.precommit_state.json
