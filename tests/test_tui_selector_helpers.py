@@ -42,9 +42,7 @@ def test_parse_selection_string_handles_garbage():
 def test_chat_key_for_tracking_priority():
     assert _chat_key_for_tracking({"composer_id": "cid", "_session_id": "sid"}) == "cid"
     assert _chat_key_for_tracking({"_session_id": "sid"}) == "sid"
-    assert (
-        _chat_key_for_tracking({"_source": "claude", "name": "foo"}) == "claude:foo"
-    )
+    assert _chat_key_for_tracking({"_source": "claude", "name": "foo"}) == "claude:foo"
 
 
 def test_chat_tracking_lookup_keys_includes_legacy_fallback():

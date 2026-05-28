@@ -21,9 +21,15 @@ import pytest
 
 @pytest.fixture
 def legacy(tmp_path, monkeypatch):
+    from chat_timeline import precommit
     from chat_timeline._legacy import main as legacy_mod
 
-    monkeypatch.setattr(legacy_mod, "HOOK_PATH", tmp_path / "pre-commit")
+    # The body of _uninstall_hook now lives in chat_timeline.precommit and
+    # binds HOOK_PATH at module-import time. Patch both so the legacy
+    # re-export and the underlying module agree.
+    hook = tmp_path / "pre-commit"
+    monkeypatch.setattr(legacy_mod, "HOOK_PATH", hook)
+    monkeypatch.setattr(precommit, "HOOK_PATH", hook)
     return legacy_mod
 
 

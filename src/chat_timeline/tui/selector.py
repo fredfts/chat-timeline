@@ -122,9 +122,7 @@ def _render(
     reset_label = " | -r mode" if reset_mode else ""
     old_label = " | rotate ON" if old_enabled else " | rotate off"
     hot_label = " | hot ON" if hot_only else " | hot off"
-    lines.append(
-        f"  selected {len(selected)}/{total}{pc_label}{reset_label}{old_label}{hot_label}"
-    )
+    lines.append(f"  selected {len(selected)}/{total}{pc_label}{reset_label}{old_label}{hot_label}")
 
     # Show current row info
     cur_row = rows[cursor] if cursor < total_rows else None
@@ -190,9 +188,7 @@ def _render(
                 is_forced = fp in force_add_fps.get(ci, set())
                 is_used = e["is_used"] if e_mode == "tracked-checkpoint" else False
                 is_auto_skip = (
-                    fp in auto_skip_fps.get(ci, set())
-                    if e_mode == "tracked-checkpoint"
-                    else False
+                    fp in auto_skip_fps.get(ci, set()) if e_mode == "tracked-checkpoint" else False
                 )
                 # When hot-only is on, cold turns are silently filtered by
                 # generate_timeline. Mirror that in the per-entry label so
@@ -214,8 +210,7 @@ def _render(
             if e.get("count", 1) > 1:
                 q_label = f"{q_label} x{e['count']}"
             lines.append(
-                f" {arrow}     {echeck} {q_label:<10} "
-                f"{e['timestamp']:<20}{trk_status:>5}  {prompt}"
+                f" {arrow}     {echeck} {q_label:<10} {e['timestamp']:<20}{trk_status:>5}  {prompt}"
             )
 
     lines.append("")
@@ -415,9 +410,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
     precommit_on = pc_state.get("enabled", False)
     hot_only = pc_state.get("hot_only", False)
     since_ts = pc_state.get("last_run_ts", 0)
-    modified_indices = (
-        _get_modified_chats(chats, since_ts) if precommit_on and since_ts > 0 else []
-    )
+    modified_indices = _get_modified_chats(chats, since_ts) if precommit_on and since_ts > 0 else []
 
     tracked_chats_data = pc_state.get("tracked_chats", {})
     tracking_modes: dict[int, str] = {}
@@ -493,9 +486,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
         if ci in entry_cache:
             return any(e["is_used"] for e in entry_cache[ci])
         c = chats[ci]
-        meta = {
-            "composer_id": (c.get("composer_id") or c.get("_session_id") or c.get("id", ""))
-        }
+        meta = {"composer_id": (c.get("composer_id") or c.get("_session_id") or c.get("id", ""))}
         dummy = Path(sanitize_filename(c.get("name", "unknown")))
         used_path = chat_used_state_path(meta, dummy)
         state = load_used_state(used_path)
@@ -633,10 +624,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
                                 tracking_modes.pop(ci, None)
                                 excluded_fps.pop(ci, None)
                                 force_add_fps.pop(ci, None)
-                        if (
-                            tracking_modes.get(ci) == "tracked-checkpoint"
-                            and ci in entry_cache
-                        ):
+                        if tracking_modes.get(ci) == "tracked-checkpoint" and ci in entry_cache:
                             auto_skip_fps[ci] = _auto_skip_fps_for_entries(entry_cache[ci])
                         else:
                             auto_skip_fps.pop(ci, None)
@@ -650,9 +638,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
                         e_mode = tracking_modes[ci]
                         fp = cur_row["entry"]["fingerprint"]
                         is_used = (
-                            cur_row["entry"]["is_used"]
-                            if e_mode == "tracked-checkpoint"
-                            else False
+                            cur_row["entry"]["is_used"] if e_mode == "tracked-checkpoint" else False
                         )
                         is_auto_skip = (
                             fp in auto_skip_fps.get(ci, set())
