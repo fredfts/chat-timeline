@@ -1,13 +1,12 @@
 """``timeline`` console entry point.
 
-Two new top-level subcommands wrap the legacy CLI:
+Two top-level subcommands wrap the rest of the CLI:
 
   * ``timeline init``   — scaffold this project for chat-timeline.
   * ``timeline deinit`` — remove the pre-commit hook and managed gitignore
                           block (output data is left in place).
 
-Anything else is forwarded to the legacy argparse in
-``chat_timeline._legacy.main``.
+Anything else is forwarded to ``chat_timeline.app:main``.
 """
 
 from __future__ import annotations
@@ -20,15 +19,15 @@ from chat_timeline import __version__
 
 
 def _require_git_repo_or_explicit_root(argv: list[str]) -> list[str]:
-    """Guard the legacy CLI against running outside a git repo.
+    """Guard the CLI against running outside a git repo.
 
     Without this, ``find_project_root()`` falls back to cwd and the source
     scanners' path-overlap rules match every Codex/Claude session whose
     recorded cwd is *under* that cwd — e.g. running ``timeline`` from
     ``C:\\Users\\Fred\\`` would scoop up every project's history.
 
-    Strips ``--no-git`` from argv before returning so the legacy argparse
-    (which doesn't know that flag) doesn't reject it.
+    Strips ``--no-git`` from argv before returning so the downstream
+    argparse (which doesn't know that flag) doesn't reject it.
     """
     if "--no-git" in argv:
         return [a for a in argv if a != "--no-git"]
@@ -70,10 +69,9 @@ def main() -> None:
     argv = _require_git_repo_or_explicit_root(argv)
     sys.argv = [sys.argv[0], *argv]
 
-    # Fall through to the legacy CLI (same flags as before).
-    from chat_timeline._legacy.main import main as legacy_main
+    from chat_timeline.app import main as app_main
 
-    legacy_main()
+    app_main()
 
 
 if __name__ == "__main__":

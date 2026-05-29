@@ -1,32 +1,29 @@
-"""
-Cursor-specific chat extraction module.
+"""Cursor source — reads chat data from Cursor's SQLite stores."""
 
-Reads chat data from Cursor's local SQLite databases and exports
-to the common markdown format used by main.py.
-"""
+from __future__ import annotations
 
-import os
 import json
-import sqlite3
+import os
 import platform
-import subprocess
 import re
+import sqlite3
+import subprocess
 from pathlib import Path
 from urllib.parse import unquote
 
-from chat_timeline._legacy.main import (
-    SCRIPT_DIR, PROJECT_DIR, STAGED_DIR,
-    epoch_ms_to_dt, iso_to_dt, fmt_dt, fmt_dt_filename,
-    export_chat_markdown, sanitize_filename, relative_path,
+from chat_timeline.markdown import (
+    epoch_ms_to_dt,
+    fmt_dt_filename,
+    iso_to_dt,
+    sanitize_filename,
 )
+from chat_timeline.markdown import export_chat_markdown as _md_export_chat_markdown
 
 SOURCE_NAME = "Cursor"
 UUID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
-AICHAT_VIEW_ID_RE = re.compile(
-    r"workbench\.panel\.aichat\.view\.([0-9a-fA-F-]{36})"
-)
+AICHAT_VIEW_ID_RE = re.compile(r"workbench\.panel\.aichat\.view\.([0-9a-fA-F-]{36})")
 EDITOR_COMPOSER_ID_RE = re.compile(r'"composerId":"([0-9a-fA-F-]{36})"')
 EDITOR_COMPOSER_ID_ESCAPED_RE = re.compile(r'\\"composerId\\":\\"([0-9a-fA-F-]{36})\\"')
 _CURSOR_STORAGE_ROOTS_CACHE = None
@@ -35,6 +32,7 @@ _CURSOR_STORAGE_ROOTS_CACHE = None
 # ---------------------------------------------------------------------------
 # Cursor storage paths
 # ---------------------------------------------------------------------------
+
 
 def cursor_storage_roots():
     """Return all Cursor user-data roots visible from this runtime."""
@@ -151,6 +149,7 @@ def find_workspace_hashes(storage_root: Path, project_dir: Path):
 # ---------------------------------------------------------------------------
 # DB helpers
 # ---------------------------------------------------------------------------
+
 
 def open_db(path):
     return sqlite3.connect(str(path))
@@ -285,9 +284,7 @@ def _load_global_composer_meta(global_conn, composer_id):
         return None
 
     is_nal_shell = (
-        cd.get("isNAL")
-        and not cd.get("name")
-        and not cd.get("fullConversationHeadersOnly")
+        cd.get("isNAL") and not cd.get("name") and not cd.get("fullConversationHeadersOnly")
     )
     if is_nal_shell:
         return None
@@ -337,17 +334,17 @@ def _load_global_composer_headers(global_conn, workspace_hashes):
         if not isinstance(cid, str) or not UUID_RE.match(cid):
             continue
 
-        results.append({
-            "composerId": cid,
-            "name": name,
-            "unifiedMode": c.get("unifiedMode", "?"),
-            "createdAt": _safe_epoch_ms(c.get("createdAt")),
-            "lastUpdatedAt": _safe_epoch_ms(
-                c.get("lastUpdatedAt") or c.get("createdAt")
-            ),
-            "status": c.get("status", ""),
-            "agentBackend": c.get("agentBackend", ""),
-        })
+        results.append(
+            {
+                "composerId": cid,
+                "name": name,
+                "unifiedMode": c.get("unifiedMode", "?"),
+                "createdAt": _safe_epoch_ms(c.get("createdAt")),
+                "lastUpdatedAt": _safe_epoch_ms(c.get("lastUpdatedAt") or c.get("createdAt")),
+                "status": c.get("status", ""),
+                "agentBackend": c.get("agentBackend", ""),
+            }
+        )
     return results
 
 
@@ -355,11 +352,13 @@ def _load_global_composer_headers(global_conn, workspace_hashes):
 # Rich-text extraction (Cursor's Lexical JSON format)
 # ---------------------------------------------------------------------------
 
+
 def extract_rich_text(rt):
     if not rt:
         return ""
     try:
         data = json.loads(rt) if isinstance(rt, str) else rt
+
         def walk(node):
             parts = []
             if isinstance(node, dict):
@@ -368,6 +367,7 @@ def extract_rich_text(rt):
                 for child in node.get("children", []):
                     parts.extend(walk(child))
             return parts
+
         return "".join(walk(data))
     except Exception:
         return ""
@@ -377,16 +377,23 @@ def extract_rich_text(rt):
 # Chat listing
 # ---------------------------------------------------------------------------
 
-def list_chats(project_dir: Path):
-    """Return list of chat metadata dicts, sorted newest-first."""
+
+def list_chats(project_dir: Path, scope: Path | None = None):
+    """Return list of chat metadata dicts, sorted newest-first.
+
+    ``scope`` narrows the workspace-hash match without affecting where exports
+    land. Defaults to ``project_dir``.
+    """
+    match_dir = scope if scope is not None else project_dir
+
     all_composers = []
     for root in cursor_storage_roots():
-        hashes = find_workspace_hashes(root, project_dir)
+        hashes = find_workspace_hashes(root, match_dir)
         if not hashes:
             continue
 
         global_conn = None
-        global_cache = {}
+        global_cache: dict = {}
         try:
             global_conn = _open_global_cursor_db(root)
         except Exception:
@@ -451,10 +458,10 @@ def list_chats(project_dir: Path):
                 global_conn.close()
 
     if not all_composers:
-        raise SystemExit(f"No Cursor workspace found for {project_dir}")
+        raise SystemExit(f"No Cursor workspace found for {match_dir}")
 
     # Deduplicate by composerId, keeping the version with most recent lastUpdatedAt
-    seen = {}
+    seen: dict[str, dict] = {}
     for c in all_composers:
         cid = c.get("composerId")
         if not cid:
@@ -479,6 +486,7 @@ def list_chats(project_dir: Path):
 # ---------------------------------------------------------------------------
 # Chat loading & conversation building
 # ---------------------------------------------------------------------------
+
 
 def load_full_chat(storage_root: Path, composer_id: str):
     """Load composerData + all bubbles from the global DB."""
@@ -539,11 +547,13 @@ def build_conversation(cd, bubble_map):
 
             if cap_type == 30 and bubble.get("thinking"):
                 thinking = bubble.get("thinking", {})
-                current["thinking_blocks"].append({
-                    "duration_ms": bubble.get("thinkingDurationMs", 0),
-                    "text": thinking.get("text", ""),
-                    "timestamp": iso_to_dt(bubble.get("createdAt")),
-                })
+                current["thinking_blocks"].append(
+                    {
+                        "duration_ms": bubble.get("thinkingDurationMs", 0),
+                        "text": thinking.get("text", ""),
+                        "timestamp": iso_to_dt(bubble.get("createdAt")),
+                    }
+                )
             elif cap_type == 15 and bubble.get("toolFormerData"):
                 tfd = bubble.get("toolFormerData", {})
                 raw_params = tfd.get("params", {})
@@ -562,11 +572,13 @@ def build_conversation(cd, bubble_map):
                 current["tool_calls"].append(tc)
             elif text:
                 model = (bubble.get("modelInfo") or {}).get("modelName", "") or default_model
-                current["assistant_parts"].append({
-                    "text": text,
-                    "timestamp": iso_to_dt(bubble.get("createdAt")),
-                    "model": model,
-                })
+                current["assistant_parts"].append(
+                    {
+                        "text": text,
+                        "timestamp": iso_to_dt(bubble.get("createdAt")),
+                        "model": model,
+                    }
+                )
 
             cp = bubble.get("checkpointId")
             if cp:
@@ -581,8 +593,14 @@ def build_conversation(cd, bubble_map):
 # Export
 # ---------------------------------------------------------------------------
 
+
 def export_single_chat(chat, include_tool_params=False):
     """Export one Cursor chat to STAGED_DIR and return the file path."""
+    from chat_timeline._state import PROJECT_DIR, STAGED_DIR
+
+    def export_chat_markdown(meta, turns, include_tool_params=False):
+        return _md_export_chat_markdown(meta, turns, include_tool_params, project_root=PROJECT_DIR)
+
     composer_id = chat["composerId"]
     name = chat.get("name", "(unnamed)")
     created_dt = epoch_ms_to_dt(chat.get("createdAt"))

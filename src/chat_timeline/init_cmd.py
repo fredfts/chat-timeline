@@ -19,7 +19,9 @@ from chat_timeline.paths import find_project_root, find_timeline_home
 GITIGNORE_OPEN = "# >>> chat-timeline >>>"
 GITIGNORE_CLOSE = "# <<< chat-timeline <<<"
 GITIGNORE_BODY = "/timeline/__pycache__/\n/timeline/.precommit_state.json\n"
-TIMELINE_GITIGNORE = "/__pycache__/\n\n/chats\n/sessions\n/contents\n.precommit_state.json\n"
+TIMELINE_GITIGNORE = (
+    "/__pycache__/\n\n/chats\n/sessions\n/contents\n.precommit_state.json\n/.cache/\n"
+)
 PRECOMMIT_STATE_DEFAULT = {
     "enabled": False,
     "last_run_ts": 0,
@@ -160,11 +162,10 @@ def run_init(argv: Sequence[str]) -> None:
 
     hook_installed = False
     if is_git and not args.no_hook:
-        # Reach into legacy installer; it picks up paths through env / module
-        # state set above.
+        # Make sure precommit picks up the freshly-detected project root.
         os.environ.setdefault("TIMELINE_PROJECT_ROOT", str(project_root))
         os.environ.setdefault("TIMELINE_HOME", str(home))
-        from chat_timeline._legacy.main import _install_hook  # noqa: WPS433
+        from chat_timeline.precommit import _install_hook  # noqa: WPS433
 
         _install_hook()
         hook_installed = True
@@ -201,7 +202,7 @@ def run_deinit(argv: Sequence[str]) -> None:
 
     os.environ.setdefault("TIMELINE_PROJECT_ROOT", str(project_root))
     os.environ.setdefault("TIMELINE_HOME", str(home))
-    from chat_timeline._legacy.main import _uninstall_hook  # noqa: WPS433
+    from chat_timeline.precommit import _uninstall_hook  # noqa: WPS433
 
     _uninstall_hook()
     _remove_project_gitignore_block(project_root)

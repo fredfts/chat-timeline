@@ -1,9 +1,6 @@
-"""
-Codex-specific chat extraction module.
+"""Codex source — reads conversation JSONL rollouts from ``~/.codex``."""
 
-Reads conversation data from Codex local JSONL files and exports
-to the common markdown format used by main.py.
-"""
+from __future__ import annotations
 
 import json
 import platform
@@ -11,11 +8,15 @@ import re
 import subprocess
 from pathlib import Path
 
-from chat_timeline._legacy.main import (
-    STAGED_DIR,
-    epoch_ms_to_dt, iso_to_dt, fmt_dt_filename,
-    export_chat_markdown, sanitize_filename, relative_path,
+from chat_timeline.markdown import (
+    epoch_ms_to_dt,
+    fmt_dt_filename,
+    iso_to_dt,
+    sanitize_filename,
 )
+from chat_timeline.markdown import export_chat_markdown as _md_export_chat_markdown
+from chat_timeline.markdown import relative_path as _md_relative_path
+from chat_timeline.sources._cache import JSONLCache
 
 SOURCE_NAME = "Codex"
 SYSTEM_USER_PREFIXES = ("<environment_context>",)
@@ -36,6 +37,7 @@ _CODEX_STORAGE_ROOTS_CACHE = None
 # ---------------------------------------------------------------------------
 # Codex storage paths
 # ---------------------------------------------------------------------------
+
 
 def codex_storage_roots():
     """Return all Codex data roots visible from this runtime."""
@@ -95,6 +97,7 @@ def codex_storage_roots():
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------
+
 
 def _to_posix(path):
     return str(path or "").replace("\\", "/")
@@ -162,6 +165,11 @@ def _paths_overlap(path, project_candidates):
 
 
 def _relative_workspace_path(path):
+    from chat_timeline._state import PROJECT_DIR
+
+    def relative_path(p):
+        return _md_relative_path(p, PROJECT_DIR)
+
     raw = str(path or "")
     if not raw:
         return ""
@@ -189,6 +197,7 @@ def _relative_workspace_path(path):
 # JSONL parsing
 # ---------------------------------------------------------------------------
 
+
 def load_conversation(jsonl_path: Path):
     """Load all records from a Codex JSONL rollout file."""
     messages = []
@@ -202,6 +211,38 @@ def load_conversation(jsonl_path: Path):
             except json.JSONDecodeError:
                 continue
     return messages
+
+
+def _peek_cwd(jsonl_path: Path) -> str:
+    """Cheap pre-scan: read up to the first 2 JSON lines for ``payload.cwd``.
+
+    Codex rollouts almost always lead with a ``session_meta`` record that
+    has ``payload.cwd``. When found, ``list_chats`` can run ``_paths_overlap``
+    *before* the expensive full-file parse. Returns "" if no cwd was visible
+    in the head — callers fall back to today's full-parse behavior in that
+    case, so nothing breaks for older/atypical session formats.
+    """
+    try:
+        with open(jsonl_path, encoding="utf-8", errors="replace") as f:
+            for _ in range(2):
+                line = f.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                payload = msg.get("payload", {})
+                if isinstance(payload, dict):
+                    cwd = payload.get("cwd")
+                    if isinstance(cwd, str) and cwd:
+                        return cwd
+    except OSError:
+        pass
+    return ""
 
 
 def _extract_session_id_from_path(jsonl_path: Path):
@@ -238,7 +279,7 @@ def _extract_codex_request_body(text: str):
 
     for i, line in enumerate(lines):
         if IDE_REQUEST_MARKER_RE.match(line.strip()):
-            body = "\n".join(lines[i + 1:]).strip()
+            body = "\n".join(lines[i + 1 :]).strip()
             if body:
                 return body
             break
@@ -275,7 +316,7 @@ def _safe_json_dict(raw):
 def _load_session_index(root: Path):
     """Load session index rows by session id, if present."""
     index_path = root / "session_index.jsonl"
-    rows = {}
+    rows: dict[str, dict] = {}
     if not index_path.exists():
         return rows
 
@@ -381,9 +422,24 @@ def extract_conversation_metadata(messages, fallback_title="", session_id_hint="
 # Chat listing
 # ---------------------------------------------------------------------------
 
-def list_chats(project_dir: Path):
-    """Return list of chat metadata dicts, sorted newest-first."""
-    project_candidates = _project_path_candidates(project_dir)
+
+def list_chats(
+    project_dir: Path,
+    scope: Path | None = None,
+    cache_dir: Path | None = None,
+):
+    """Return list of chat metadata dicts, sorted newest-first.
+
+    ``scope`` narrows the cwd-overlap check without affecting where exports
+    land. Defaults to ``project_dir``.
+
+    ``cache_dir``, when given, enables an on-disk metadata cache under
+    ``<cache_dir>/codex/``. Invalidated by JSONL mtime/size, so the worst
+    case (corrupt or stale entry) is one extra parse — same as today.
+    """
+    match_dir = scope if scope is not None else project_dir
+    project_candidates = _project_path_candidates(match_dir)
+    cache = JSONLCache(cache_dir, "codex") if cache_dir is not None else None
 
     chats = []
     for root in codex_storage_roots():
@@ -391,6 +447,22 @@ def list_chats(project_dir: Path):
         for jsonl_file in _session_files(root):
             sid_hint = _extract_session_id_from_path(jsonl_file)
             idx = index_rows.get(sid_hint.lower(), {}) if sid_hint else {}
+
+            # Phase 1 (cheap): peek at the JSONL head for the cwd. If we get
+            # a definitive non-overlap, skip the full parse — the dominant
+            # cost on wide-scope scans.
+            cwd_hint = _peek_cwd(jsonl_file)
+            if cwd_hint and not _paths_overlap(cwd_hint, project_candidates):
+                continue
+
+            # Phase 2: full parse (or cache hit). The cache stores the chat
+            # dict; on hit we reconstruct it without touching the JSONL body.
+            cached = cache.get(jsonl_file) if cache is not None else None
+            if cached is not None:
+                # Rehydrate the Path serialized as str
+                cached["_jsonl_path"] = Path(cached["_jsonl_path"])
+                chats.append(cached)
+                continue
 
             messages = load_conversation(jsonl_file)
             if not messages:
@@ -420,7 +492,7 @@ def list_chats(project_dir: Path):
                 file_mtime_ms,
             )
 
-            chats.append({
+            chat = {
                 "name": meta["title"] or "(unnamed)",
                 "lastUpdatedAt": updated_ms,
                 "createdAt": int(first_dt.timestamp() * 1000) if first_dt else 0,
@@ -431,10 +503,17 @@ def list_chats(project_dir: Path):
                 "_model": meta.get("model", ""),
                 "_branch": meta.get("branch", ""),
                 "_cwd": meta.get("cwd", ""),
-            })
+            }
+            chats.append(chat)
+
+            if cache is not None:
+                # Serialize Path as str for JSON storage; rehydrated on read.
+                serializable = dict(chat)
+                serializable["_jsonl_path"] = str(jsonl_file)
+                cache.put(jsonl_file, serializable)
 
     # Deduplicate across roots by session id (fallback to file path)
-    seen = {}
+    seen: dict[str, dict] = {}
     for c in chats:
         key = c.get("_session_id") or str(c.get("_jsonl_path"))
         if key not in seen or c["lastUpdatedAt"] > seen[key]["lastUpdatedAt"]:
@@ -444,12 +523,13 @@ def list_chats(project_dir: Path):
 
     if chats:
         return chats
-    raise SystemExit(f"No Codex sessions found for {project_dir}")
+    raise SystemExit(f"No Codex sessions found for {match_dir}")
 
 
 # ---------------------------------------------------------------------------
 # Conversation building
 # ---------------------------------------------------------------------------
+
 
 def _normalize_tool_call(name, params):
     """Map Codex-native tool names into shared exporter-friendly names."""
@@ -561,11 +641,13 @@ def build_conversation(messages):
                         current.get("_turn_id", ""),
                         current.get("user_model", "unknown"),
                     )
-                    current["assistant_parts"].append({
-                        "text": text,
-                        "timestamp": ts,
-                        "model": model or "unknown",
-                    })
+                    current["assistant_parts"].append(
+                        {
+                            "text": text,
+                            "timestamp": ts,
+                            "model": model or "unknown",
+                        }
+                    )
                 continue
 
             if payload_type == "patch_apply_end" and current is not None:
@@ -574,17 +656,19 @@ def build_conversation(messages):
                     status = "completed" if payload.get("success") else "failed"
                 call_id = payload.get("call_id", "")
                 for path in _patch_changed_files(payload):
-                    current["tool_calls"].append({
-                        "name": "edit_file",
-                        "status": status or "completed",
-                        "timestamp": ts,
-                        "params": {"file_path": path},
-                        "raw_args": json.dumps(
-                            {"call_id": call_id, "file_path": path},
-                            ensure_ascii=False,
-                            default=str,
-                        ),
-                    })
+                    current["tool_calls"].append(
+                        {
+                            "name": "edit_file",
+                            "status": status or "completed",
+                            "timestamp": ts,
+                            "params": {"file_path": path},
+                            "raw_args": json.dumps(
+                                {"call_id": call_id, "file_path": path},
+                                ensure_ascii=False,
+                                default=str,
+                            ),
+                        }
+                    )
                 continue
 
         if msg_type != "response_item" or current is None:
@@ -597,40 +681,48 @@ def build_conversation(messages):
             params = _safe_json_dict(raw_args)
             raw_name = payload.get("name", "unknown")
             name, params = _normalize_tool_call(raw_name, params)
-            current["tool_calls"].append({
-                "name": name,
-                "status": "completed",
-                "timestamp": ts,
-                "params": params if isinstance(params, dict) else {},
-                "raw_args": raw_args if isinstance(raw_args, str) else json.dumps(
-                    raw_args, ensure_ascii=False, default=str),
-            })
+            current["tool_calls"].append(
+                {
+                    "name": name,
+                    "status": "completed",
+                    "timestamp": ts,
+                    "params": params if isinstance(params, dict) else {},
+                    "raw_args": raw_args
+                    if isinstance(raw_args, str)
+                    else json.dumps(raw_args, ensure_ascii=False, default=str),
+                }
+            )
 
         elif item_type == "custom_tool_call":
             raw_name = payload.get("name", "unknown")
             raw_input = payload.get("input", "")
             params = _safe_json_dict(raw_input)
             name, params = _normalize_tool_call(raw_name, params)
-            current["tool_calls"].append({
-                "name": name,
-                "status": payload.get("status", "completed"),
-                "timestamp": ts,
-                "params": params if isinstance(params, dict) else {},
-                "raw_args": raw_input if isinstance(raw_input, str) else json.dumps(
-                    raw_input, ensure_ascii=False, default=str),
-            })
+            current["tool_calls"].append(
+                {
+                    "name": name,
+                    "status": payload.get("status", "completed"),
+                    "timestamp": ts,
+                    "params": params if isinstance(params, dict) else {},
+                    "raw_args": raw_input
+                    if isinstance(raw_input, str)
+                    else json.dumps(raw_input, ensure_ascii=False, default=str),
+                }
+            )
 
         elif item_type == "web_search_call":
             action = payload.get("action", {})
             if not isinstance(action, dict):
                 action = {}
-            current["tool_calls"].append({
-                "name": "WebSearch",
-                "status": payload.get("status", "completed"),
-                "timestamp": ts,
-                "params": {"query": action.get("query", "")},
-                "raw_args": json.dumps(action, ensure_ascii=False, default=str),
-            })
+            current["tool_calls"].append(
+                {
+                    "name": "WebSearch",
+                    "status": payload.get("status", "completed"),
+                    "timestamp": ts,
+                    "params": {"query": action.get("query", "")},
+                    "raw_args": json.dumps(action, ensure_ascii=False, default=str),
+                }
+            )
 
     if current:
         turns.append(current)
@@ -644,8 +736,14 @@ def build_conversation(messages):
 # Export
 # ---------------------------------------------------------------------------
 
+
 def export_single_chat(chat, include_tool_params=False):
     """Export one Codex conversation to STAGED_DIR and return the file path."""
+    from chat_timeline._state import PROJECT_DIR, STAGED_DIR
+
+    def export_chat_markdown(meta, turns, include_tool_params=False):
+        return _md_export_chat_markdown(meta, turns, include_tool_params, project_root=PROJECT_DIR)
+
     jsonl_path = chat["_jsonl_path"]
     session_id = chat.get("_session_id", "")
     name = chat.get("name", "(unnamed)")

@@ -1,14 +1,7 @@
-"""Tests for `_uninstall_hook` — covers the two v0.1.1 hotfixes:
+"""Tests for ``_uninstall_hook`` — covers the v0.1.1 hotfixes around
+marker + standalone hook removal.
 
-1. A hook file with BOTH a marker-delimited section AND a separate
-   standalone block must be removed entirely; pre-fix the marker path
-   returned early and left the standalone block behind.
-2. The standalone-hook detection must catch the legacy form where
-   `SCRIPT="$TOPLEVEL/timeline/main.py"` and `python3 "$SCRIPT" -x`
-   live on separate lines, so the literal string `timeline/main.py -x`
-   never appears.
-
-The import of ``chat_timeline._legacy.main`` is deferred to fixture time:
+The import of ``chat_timeline.precommit`` is deferred to fixture time:
 that module captures ``HOOK_PATH`` from env/cwd at import time, so a
 module-level import here would freeze it before sibling tests have set
 up their tmp dirs.
@@ -21,10 +14,12 @@ import pytest
 
 @pytest.fixture
 def legacy(tmp_path, monkeypatch):
-    from chat_timeline._legacy import main as legacy_mod
+    from chat_timeline import precommit
 
-    monkeypatch.setattr(legacy_mod, "HOOK_PATH", tmp_path / "pre-commit")
-    return legacy_mod
+    # _uninstall_hook reads HOOK_PATH at call time from this module's
+    # binding; patching at the module level redirects it to the tmp file.
+    monkeypatch.setattr(precommit, "HOOK_PATH", tmp_path / "pre-commit")
+    return precommit
 
 
 def test_uninstall_removes_marker_plus_standalone(legacy):

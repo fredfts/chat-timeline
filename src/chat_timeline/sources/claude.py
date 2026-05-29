@@ -1,20 +1,19 @@
-"""
-Claude Code-specific chat extraction module.
+"""Claude Code source — reads JSONL conversation files from ``~/.claude``."""
 
-Reads conversation data from Claude Code's local JSONL files and exports
-to the common markdown format used by main.py.
-"""
+from __future__ import annotations
 
 import json
 import platform
 import subprocess
 from pathlib import Path
 
-from chat_timeline._legacy.main import (
-    PROJECT_DIR, STAGED_DIR,
-    epoch_ms_to_dt, iso_to_dt, fmt_dt, fmt_dt_filename,
-    export_chat_markdown, sanitize_filename,
+from chat_timeline.markdown import (
+    epoch_ms_to_dt,
+    fmt_dt_filename,
+    iso_to_dt,
+    sanitize_filename,
 )
+from chat_timeline.markdown import export_chat_markdown as _md_export_chat_markdown
 
 SOURCE_NAME = "Claude"
 SYSTEM_USER_PREFIXES = (
@@ -27,12 +26,13 @@ INTERRUPTION_MARKERS = {
     "[response interrupted by user]",
 }
 _CLAUDE_STORAGE_ROOTS_CACHE = None
-_PROJECT_STORAGES_CACHE = {}
+_PROJECT_STORAGES_CACHE: dict[str, tuple] = {}
 
 
 # ---------------------------------------------------------------------------
 # Claude Code storage paths
 # ---------------------------------------------------------------------------
+
 
 def claude_storage_roots():
     """Return all Claude Code data roots visible from this runtime."""
@@ -157,10 +157,10 @@ def find_project_storages(project_dir: Path):
                     break
 
         if matched is not None:
-            key = str(matched).lower()
-            if key not in seen:
+            key2 = str(matched).lower()
+            if key2 not in seen:
                 storages.append(matched)
-                seen.add(key)
+                seen.add(key2)
 
     if storages:
         _PROJECT_STORAGES_CACHE[key] = tuple(storages)
@@ -168,7 +168,8 @@ def find_project_storages(project_dir: Path):
     raise SystemExit(
         f"No Claude Code project storage found for {project_dir}\n"
         f"  Tried slugs: {', '.join(slugs)}\n"
-        f"  Searched roots: {', '.join(searched_roots)}")
+        f"  Searched roots: {', '.join(searched_roots)}"
+    )
 
 
 def find_project_storage(project_dir: Path):
@@ -179,6 +180,7 @@ def find_project_storage(project_dir: Path):
 # ---------------------------------------------------------------------------
 # JSONL parsing
 # ---------------------------------------------------------------------------
+
 
 def load_conversation(jsonl_path: Path):
     """Load all messages from a Claude Code JSONL conversation file."""
@@ -286,11 +288,12 @@ def extract_conversation_metadata(messages):
 # Chat listing
 # ---------------------------------------------------------------------------
 
-def list_chats(project_dir: Path):
+
+def list_chats(project_dir: Path, scope: Path | None = None):
     """Return list of chat metadata dicts, sorted newest-first.
 
-    Each dict has standardized keys for the interactive selector:
-    name, lastUpdatedAt, createdAt, unifiedMode, plus Claude-specific fields.
+    ``scope`` is accepted for protocol uniformity; Claude filters only by
+    user_count, so a narrowed scope has no effect today.
     """
     project_storages = find_project_storages(project_dir)
 
@@ -318,23 +321,25 @@ def list_chats(project_dir: Path):
             if user_count == 0:
                 continue
 
-            chats.append({
-                "name": meta["title"] or "(unnamed)",
-                "lastUpdatedAt": int(last_dt.timestamp() * 1000) if last_dt else 0,
-                "createdAt": int(first_dt.timestamp() * 1000) if first_dt else 0,
-                "unifiedMode": "agent",
-                # Claude-specific fields
-                "_session_id": meta["session_id"],
-                "_jsonl_path": jsonl_file,
-                "_model": meta["model"],
-                "_branch": meta["branch"],
-                "_version": meta["version"],
-                "_user_count": user_count,
-                "_user_identities": user_identities,
-            })
+            chats.append(
+                {
+                    "name": meta["title"] or "(unnamed)",
+                    "lastUpdatedAt": int(last_dt.timestamp() * 1000) if last_dt else 0,
+                    "createdAt": int(first_dt.timestamp() * 1000) if first_dt else 0,
+                    "unifiedMode": "agent",
+                    # Claude-specific fields
+                    "_session_id": meta["session_id"],
+                    "_jsonl_path": jsonl_file,
+                    "_model": meta["model"],
+                    "_branch": meta["branch"],
+                    "_version": meta["version"],
+                    "_user_count": user_count,
+                    "_user_identities": user_identities,
+                }
+            )
 
     # Deduplicate across roots by session_id (fallback to file path)
-    seen = {}
+    seen: dict[str, dict] = {}
     for c in chats:
         key = c.get("_session_id") or str(c.get("_jsonl_path"))
         if key not in seen or c["lastUpdatedAt"] > seen[key]["lastUpdatedAt"]:
@@ -352,7 +357,7 @@ def list_chats(project_dir: Path):
         ),
         reverse=True,
     )
-    collapsed = []
+    collapsed: list[dict] = []
     for candidate in ranked:
         seq = candidate.get("_user_identities", [])
         is_clone = False
@@ -383,6 +388,7 @@ def list_chats(project_dir: Path):
 # Conversation building
 # ---------------------------------------------------------------------------
 
+
 def _load_subagent_tool_calls(session_dir: Path, agent_id: str, timestamp):
     """Load tool calls from a subagent's JSONL file."""
     subagent_path = session_dir / "subagents" / f"agent-{agent_id}.jsonl"
@@ -399,13 +405,15 @@ def _load_subagent_tool_calls(session_dir: Path, agent_id: str, timestamp):
                 continue
             if block.get("type") == "tool_use":
                 params = block.get("input", {})
-                tool_calls.append({
-                    "name": block.get("name", "unknown"),
-                    "status": "completed",
-                    "timestamp": iso_to_dt(msg.get("timestamp")) or timestamp,
-                    "params": params if isinstance(params, dict) else {},
-                    "raw_args": json.dumps(params, ensure_ascii=False, default=str),
-                })
+                tool_calls.append(
+                    {
+                        "name": block.get("name", "unknown"),
+                        "status": "completed",
+                        "timestamp": iso_to_dt(msg.get("timestamp")) or timestamp,
+                        "params": params if isinstance(params, dict) else {},
+                        "raw_args": json.dumps(params, ensure_ascii=False, default=str),
+                    }
+                )
     return tool_calls
 
 
@@ -437,7 +445,7 @@ def build_conversation(messages, session_dir: Path):
     # `id`s within a msg, and text/thinking blocks dedup by their content
     # prefix (handles the case where a future Claude version replays earlier
     # blocks in cumulative content arrays).
-    seen_blocks_by_msg = {}
+    seen_blocks_by_msg: dict[str, set] = {}
 
     def _block_fingerprint(block):
         bt = block.get("type", "")
@@ -495,11 +503,13 @@ def build_conversation(messages, session_dir: Path):
                 if block_type == "thinking":
                     text = block.get("thinking", "")
                     if text:
-                        current["thinking_blocks"].append({
-                            "duration_ms": 0,
-                            "text": text,
-                            "timestamp": iso_to_dt(msg.get("timestamp")),
-                        })
+                        current["thinking_blocks"].append(
+                            {
+                                "duration_ms": 0,
+                                "text": text,
+                                "timestamp": iso_to_dt(msg.get("timestamp")),
+                            }
+                        )
 
                 elif block_type == "tool_use":
                     params = block.get("input", {})
@@ -509,8 +519,7 @@ def build_conversation(messages, session_dir: Path):
                         "status": "completed",
                         "timestamp": iso_to_dt(msg.get("timestamp")),
                         "params": params if isinstance(params, dict) else {},
-                        "raw_args": json.dumps(
-                            params, ensure_ascii=False, default=str),
+                        "raw_args": json.dumps(params, ensure_ascii=False, default=str),
                     }
                     current["tool_calls"].append(tc)
 
@@ -518,18 +527,20 @@ def build_conversation(messages, session_dir: Path):
                     if block.get("name") == "Agent" and tool_id in tool_to_agent:
                         agent_id = tool_to_agent[tool_id]
                         sub_tcs = _load_subagent_tool_calls(
-                            session_dir, agent_id,
-                            iso_to_dt(msg.get("timestamp")))
+                            session_dir, agent_id, iso_to_dt(msg.get("timestamp"))
+                        )
                         current["tool_calls"].extend(sub_tcs)
 
                 elif block_type == "text":
                     text = block.get("text", "")
                     if text:
-                        current["assistant_parts"].append({
-                            "text": text,
-                            "timestamp": iso_to_dt(msg.get("timestamp")),
-                            "model": model,
-                        })
+                        current["assistant_parts"].append(
+                            {
+                                "text": text,
+                                "timestamp": iso_to_dt(msg.get("timestamp")),
+                                "model": model,
+                            }
+                        )
 
     if current:
         turns.append(current)
@@ -540,8 +551,14 @@ def build_conversation(messages, session_dir: Path):
 # Export
 # ---------------------------------------------------------------------------
 
+
 def export_single_chat(chat, include_tool_params=False):
     """Export one Claude Code conversation to STAGED_DIR and return the file path."""
+    from chat_timeline._state import PROJECT_DIR, STAGED_DIR
+
+    def export_chat_markdown(meta, turns, include_tool_params=False):
+        return _md_export_chat_markdown(meta, turns, include_tool_params, project_root=PROJECT_DIR)
+
     jsonl_path = chat["_jsonl_path"]
     session_id = chat["_session_id"]
     name = chat.get("name", "(unnamed)")
@@ -568,18 +585,20 @@ def export_single_chat(chat, include_tool_params=False):
         for tc in turn["tool_calls"]:
             total_tool_calls += 1
             if tc["name"] in ("Edit", "Write", "edit_file", "edit_file_v2"):
-                fp = tc["params"].get("file_path",
-                     tc["params"].get("relativeWorkspacePath",
-                     tc["params"].get("filePath",
-                     tc["params"].get("path", ""))))
+                fp = tc["params"].get(
+                    "file_path",
+                    tc["params"].get(
+                        "relativeWorkspacePath",
+                        tc["params"].get("filePath", tc["params"].get("path", "")),
+                    ),
+                )
                 if fp:
                     files_affected.add(fp)
 
     # Extract turn duration if available
     turn_duration_ms = 0
     for msg in messages:
-        if (msg.get("type") == "system"
-                and msg.get("subtype") == "turn_duration"):
+        if msg.get("type") == "system" and msg.get("subtype") == "turn_duration":
             turn_duration_ms += msg.get("durationMs", 0)
 
     meta = {

@@ -4,6 +4,49 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [0.2.0] — 2026-05-28
+
+Major refactor: the 3,430-line vendored monolith at
+`src/chat_timeline/_legacy/main.py` is gone. Code is now organized into
+single-purpose modules and the package is fully lint/type-checked. The
+on-disk format (`chats/`, `sessions/`, `contents/`, `timeline.md`) and
+the CLI are unchanged — outputs are byte-identical to v0.1.1.
+
+### Added
+- Source plugin layer: `chat_timeline.sources.{base,cursor,claude,codex}`
+  with a `Source` protocol and a documented chat-dict schema. Sources
+  now take an optional `scope` parameter so callers can narrow the
+  cwd-overlap match without affecting where exports land.
+- Mtime-keyed JSONL cache (`chat_timeline.sources._cache.JSONLCache`)
+  under `<HISTORY_DIR>/.cache/sessions/<source>/`. Warm scans skip the
+  full JSONL parse for matched sessions; entries auto-invalidate when
+  the source file changes.
+- Two-phase scan for Codex: read the first JSONL line for `payload.cwd`
+  and skip non-overlapping sessions without the expensive full parse.
+- Test coverage: 76 cases across markdown, git_utils, cache, sources,
+  TUI helpers, paths, init, and the cli guard.
+
+### Changed
+- `chat_timeline.markdown`, `.git_utils`, `.session`, `.timeline`,
+  `.precommit`, `.tui.{keyboard,selector}`, `.app`, and `._state` carved
+  out of the legacy monolith. Each takes its dependencies explicitly
+  (or via the `_state` path globals) rather than reading shared module-
+  level state.
+- `paths._git_toplevel` and `paths.find_project_root` are now memoized
+  (`functools.cache`). The v0.1.1 CLI guard double-call no longer pays
+  the ~70ms subprocess cost twice.
+- `init_cmd.TIMELINE_GITIGNORE` now ignores `/.cache/`.
+
+### Removed
+- `src/chat_timeline/_legacy/` (and the `[tool.ruff].extend-exclude` /
+  `[tool.mypy].exclude` entries that fenced it off).
+
+### Performance
+- Fixes the v0.1.0 scan-perf regression in projects with many Codex
+  sessions: the peek-then-cache flow makes wide-scope scans cheap. Cold
+  runs are slightly faster than v0.1.1 thanks to the lru-cached
+  `_git_toplevel`; subsequent runs avoid re-parsing matched JSONLs.
+
 ## [0.1.1] — 2026-05-28
 
 Hotfix patch surfaced during the `mascat` migration to `timeline …`.
