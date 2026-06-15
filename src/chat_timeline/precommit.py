@@ -1,10 +1,11 @@
 """Pre-commit hook installer + standalone runner.
 
-Extracted from ``_legacy/main.py`` in Phase 5. Reads path globals
-(``HOOK_PATH``, ``PRECOMMIT_STATE``, ``STAGED_DIR``, ``PROJECT_DIR``,
-``HISTORY_DIR_NAME``) from ``_legacy.main`` so the v0.1.x behavior is
-preserved exactly. Phase 6 will introduce a Paths context and lift
-those globals out.
+Path globals (``PRECOMMIT_STATE``, ``STAGED_DIR``, ``PROJECT_DIR``,
+``HISTORY_DIR_NAME``) come from ``chat_timeline._state``, resolved once at
+process start. The pre-commit hook path is resolved fresh per call via
+``_resolve_hook_path`` instead, so install/uninstall stay correct when the
+cwd or ``TIMELINE_PROJECT_ROOT`` changed after import (e.g. ``timeline init``,
+or the test suite).
 """
 
 from __future__ import annotations
@@ -19,13 +20,13 @@ from pathlib import Path
 
 from chat_timeline._state import (
     HISTORY_DIR_NAME,
-    HOOK_PATH,
     PRECOMMIT_STATE,
     PROJECT_DIR,
     STAGED_DIR,
 )
 from chat_timeline.git_utils import git_run as _git_run
 from chat_timeline.markdown import sanitize_filename
+from chat_timeline.paths import find_project_root
 
 
 def git_run(*args, cwd=None):
@@ -33,24 +34,50 @@ def git_run(*args, cwd=None):
     return _git_run(*args, cwd=Path(cwd) if cwd else PROJECT_DIR)
 
 
+# Tri-state "hot" filter, cycled by 'h' in the selector and persisted as
+# ``hot_mode``:
+#   off   — emit every turn
+#   chat  — keep a whole chat iff at least one of its turns touched a file
+#   entry — keep only the individual turns that touched a file
+HOT_MODES = ("off", "chat", "entry")
+
+
+def next_hot_mode(mode):
+    """Next value in the off -> chat -> entry -> off cycle."""
+    try:
+        return HOT_MODES[(HOT_MODES.index(mode) + 1) % len(HOT_MODES)]
+    except ValueError:
+        return "chat"
+
+
 def _load_precommit_state():
     """Load the pre-commit state file.
 
-    Returns dict with 'enabled', 'last_run_ts', and 'tracked_chats'.
-    tracked_chats maps chat key -> {"excluded_fingerprints": [...]}.
+    Returns dict with 'enabled', 'last_run_ts', 'tracked_chats', and
+    'hot_mode'. tracked_chats maps chat key -> {"excluded_fingerprints": [...]}.
+
+    The legacy boolean ``hot_only`` is migrated to ``hot_mode`` on load
+    (True -> "entry", False -> "off") and dropped, so callers only ever see
+    the tri-state key.
     """
     default = {
         "enabled": False,
         "last_run_ts": 0,
         "tracked_chats": {},
-        "hot_only": False,
+        "hot_mode": "off",
     }
     if not PRECOMMIT_STATE.exists():
         return default
     try:
         data = json.loads(PRECOMMIT_STATE.read_text(encoding="utf-8"))
         data.setdefault("tracked_chats", {})
-        return {**default, **data}
+        state = {**default, **data}
+        if "hot_mode" not in data:
+            state["hot_mode"] = "entry" if data.get("hot_only") else "off"
+        if state["hot_mode"] not in HOT_MODES:
+            state["hot_mode"] = "off"
+        state.pop("hot_only", None)
+        return state
     except Exception:
         return default
 
@@ -110,13 +137,27 @@ def _win32_ancestor_has_amend():
     return False
 
 
-def _install_hook():
+def _resolve_hook_path():
+    """Resolve ``<project>/.git/hooks/pre-commit`` at call time.
+
+    ``_state.HOOK_PATH`` is frozen at module-import time from whatever cwd/env
+    was active then. Resolving the project root fresh here keeps install and
+    uninstall pointed at the right repo when the cwd or ``TIMELINE_PROJECT_ROOT``
+    changed afterwards — e.g. ``timeline init`` sets the env right before
+    installing, and the test suite stands up throwaway repos.
+    """
+    return find_project_root() / ".git" / "hooks" / "pre-commit"
+
+
+def _install_hook(hook_path=None):
     """Install the git pre-commit hook.
 
     The hook prefers the installed ``timeline`` console script, falls back
-    to ``python -m chat_timeline`` (or WSL on Windows hosts).
+    to ``python -m chat_timeline`` (or WSL on Windows hosts). ``hook_path``
+    defaults to the freshly-resolved ``<project>/.git/hooks/pre-commit``.
     """
-    hooks_dir = HOOK_PATH.parent
+    hook_path = hook_path or _resolve_hook_path()
+    hooks_dir = hook_path.parent
     hooks_dir.mkdir(parents=True, exist_ok=True)
 
     hook_body = (
@@ -156,12 +197,12 @@ def _install_hook():
     )
 
     # If a hook already exists, check if it's ours (current or legacy)
-    if HOOK_PATH.exists():
-        content = HOOK_PATH.read_text(encoding="utf-8", errors="replace")
+    if hook_path.exists():
+        content = hook_path.read_text(encoding="utf-8", errors="replace")
         if any(marker in content for marker in installed_markers):
             return  # already installed (current or legacy variant)
         # Append to existing hook
-        HOOK_PATH.write_text(
+        hook_path.write_text(
             content.rstrip("\n") + "\n\n"
             "# --- timeline pre-commit ---\n" + hook_body + "# --- end timeline pre-commit ---\n",
             encoding="utf-8",
@@ -169,21 +210,22 @@ def _install_hook():
         print("  pre-commit: appended timeline hook to existing hook")
         return
 
-    HOOK_PATH.write_text(
+    hook_path.write_text(
         "#!/bin/sh\n"
         "# chat-timeline pre-commit hook — works in WSL, Git Bash, "
         "and POSIX shells\n" + hook_body,
         encoding="utf-8",
     )
-    HOOK_PATH.chmod(0o755)
+    hook_path.chmod(0o755)
     print("  pre-commit: hook installed")
 
 
-def _uninstall_hook():
+def _uninstall_hook(hook_path=None):
     """Remove the timeline pre-commit hook."""
-    if not HOOK_PATH.exists():
+    hook_path = hook_path or _resolve_hook_path()
+    if not hook_path.exists():
         return
-    content = HOOK_PATH.read_text(encoding="utf-8", errors="replace")
+    content = hook_path.read_text(encoding="utf-8", errors="replace")
     # Strip current + legacy section markers from any appended-block install.
     new_content = content
     for marker_open, marker_close in (
@@ -214,16 +256,16 @@ def _uninstall_hook():
     )
 
     if is_standalone:
-        HOOK_PATH.unlink()
+        hook_path.unlink()
         print("  pre-commit: hook removed")
         return
 
     if new_content != content:
         if new_content.strip():
-            HOOK_PATH.write_text(new_content, encoding="utf-8")
+            hook_path.write_text(new_content, encoding="utf-8")
             print("  pre-commit: removed timeline hook (other hooks preserved)")
         else:
-            HOOK_PATH.unlink()
+            hook_path.unlink()
             print("  pre-commit: hook removed")
 
 
@@ -460,9 +502,11 @@ def _run_standalone():
         rotated = rotate_timeline(force=False)
 
     print("[pre-commit timeline] Generating timeline...")
-    hot_only_setting = pc_state.get("hot_only", False)
-    if hot_only_setting:
-        print("[pre-commit timeline] hot-only ON — dropping turns without file changes")
+    hot_mode_setting = pc_state.get("hot_mode", "off")
+    if hot_mode_setting == "entry":
+        print("[pre-commit timeline] hot=entry — dropping turns without file changes")
+    elif hot_mode_setting == "chat":
+        print("[pre-commit timeline] hot=chat — dropping chats with no file-changing turn")
     generate_timeline(
         reset_chats=False,
         reset_timeline=rotated,
@@ -470,7 +514,7 @@ def _run_standalone():
         force_add_fingerprints=all_force_add_fps or None,
         clean_mode_chat_keys=all_clean_keys or None,
         strict_dedup=True,
-        hot_only=hot_only_setting,
+        hot_mode=hot_mode_setting,
     )
 
     # Don't move staged to archive in standalone mode

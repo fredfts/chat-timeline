@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- The selector's `h` key now cycles a tri-state **hot** filter instead of a
+  boolean toggle: `off` → `chat` → `entry`. `entry` keeps only the turns that
+  touched a file (the previous "hot ON" behavior); `chat` keeps a whole chat
+  whenever at least one of its turns touched a file. The persisted setting
+  moves from `hot_only` (bool) to `hot_mode` (string); existing state files
+  are migrated on load (`hot_only: true` → `"entry"`, `false` → `"off"`).
+
+### Fixed
+- Pre-commit hook install/uninstall now resolve `<project>/.git/hooks/pre-commit`
+  per call instead of using the path frozen into `chat_timeline._state` at
+  import time, so they always target the current project even when the cwd or
+  `TIMELINE_PROJECT_ROOT` changed after import. Removes a test-isolation hazard
+  where importing the package could pin the hook path to the wrong repo.
+
 ## [0.2.0] — 2026-05-28
 
 Major refactor: the 3,430-line vendored monolith at

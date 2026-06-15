@@ -823,7 +823,7 @@ def generate_timeline(
     force_add_fingerprints=None,
     clean_mode_chat_keys=None,
     strict_dedup=False,
-    hot_only=False,
+    hot_mode="off",
     explicit_select_fingerprints=None,
 ):
     """Build/update timeline.md + contents/timeline.json.
@@ -840,16 +840,21 @@ def generate_timeline(
                     Combined with reset_timeline, also pulls fingerprints
                     from prior archives so cross-cycle dedup survives any
                     gap in chats/used/ state.
-    hot_only:       skip emitting entries for turns that did not touch any
-                    file (no Edit/Write/apply_patch tool call). Cold turns
-                    still bypass dedup/watermark for this turn, so they can
-                    surface in a later non-hot-only run. Combine with
-                    reset_timeline to get a pure hot-only rebuild.
-                    Force-add ('t') and explicit Space cherry-pick override
-                    this filter — the user said "include this one".
+    hot_mode:       tri-state "hot" filter over turns that did not touch any
+                    file (no Edit/Write/apply_patch tool call):
+                      "off"   — emit every turn.
+                      "entry" — skip individual cold turns.
+                      "chat"  — skip a whole chat unless at least one of its
+                                turns touched a file (then all of its turns
+                                pass the filter).
+                    Cold turns still bypass dedup/watermark for this turn, so
+                    they can surface in a later "off" run. Combine with
+                    reset_timeline to get a pure hot rebuild. Force-add ('t')
+                    and explicit Space cherry-pick override this filter — the
+                    user said "include this one".
     explicit_select_fingerprints: per-entry Space cherry-picks from the TUI.
                     Treated as an explicit "include" signal that bypasses
-                    hot_only (in addition to is_forced).
+                    hot_mode (in addition to is_forced).
     """
     json_path = CONTENTS_DIR / "timeline.json"
     has_staged = STAGED_DIR.exists() and list(STAGED_DIR.glob("*.md"))
@@ -991,6 +996,10 @@ def generate_timeline(
         last_added_idx = -1
         checkpoint_auto_skip_hashes = set()
 
+        # hot=chat: a chat is "hot" iff at least one of its turns touched a
+        # file. When it isn't, every turn is cold; when it is, no turn is.
+        chat_is_hot = hot_mode == "chat" and any(_turn_has_file_changes(t) for t in turns)
+
         # In checkpoint mode, non-used entries up to the last used checkpoint
         # are default-skipped unless force-added.
         if (not reset_chats) and (not is_clean):
@@ -1070,22 +1079,23 @@ def generate_timeline(
             if excluded_fingerprints and turn_hash in excluded_fingerprints:
                 continue
 
-            # Hot-only filter: drop turns without any file change unless the
-            # user explicitly opted them in via 't' force-add or Space
-            # cherry-pick. Do NOT advance last_added_idx or
-            # existing_fingerprints here, so the turn stays eligible for a
-            # later non-hot-only run (the watermark may still mark it seen
-            # if a later hot turn lands in this chat).
+            # Hot filter: drop cold turns unless the user explicitly opted
+            # them in via 't' force-add or Space cherry-pick. "entry" judges
+            # each turn on its own file changes; "chat" judges the whole chat
+            # (computed once as chat_is_hot above). Do NOT advance
+            # last_added_idx or existing_fingerprints here, so the turn stays
+            # eligible for a later "off" run (the watermark may still mark it
+            # seen if a later hot turn lands in this chat).
             is_explicit_pick = bool(
                 explicit_select_fingerprints and turn_hash in explicit_select_fingerprints
             )
-            if (
-                hot_only
-                and not _turn_has_file_changes(turn)
-                and not is_forced
-                and not is_explicit_pick
-            ):
-                continue
+            if hot_mode != "off" and not is_forced and not is_explicit_pick:
+                if hot_mode == "chat":
+                    is_cold = not chat_is_hot
+                else:  # "entry"
+                    is_cold = not _turn_has_file_changes(turn)
+                if is_cold:
+                    continue
 
             existing_fingerprints.add(turn_hash)
             last_added_idx = max(last_added_idx, ti)

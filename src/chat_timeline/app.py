@@ -246,19 +246,24 @@ def main():
                 tl_clean_keys.add(ck)
         if do_c and deselected_fps:
             tl_excluded.update(deselected_fps)
-        hot_only_setting = tl_pc_state.get("hot_only", False)
+        hot_mode_setting = tl_pc_state.get("hot_mode", "off")
         result = generate_timeline(
             reset_chats=args.reset_chats,
             reset_timeline=effective_reset_timeline,
             excluded_fingerprints=tl_excluded or None,
             force_add_fingerprints=tl_force_add or None,
             clean_mode_chat_keys=tl_clean_keys or None,
-            hot_only=hot_only_setting,
+            hot_mode=hot_mode_setting,
             explicit_select_fingerprints=explicit_select_fps or None,
         )
-        if hot_only_setting:
+        if hot_mode_setting == "entry":
             print(
-                "  hot-only: dropping turns without file changes "
+                "  hot=entry: dropping turns without file changes "
+                "(force-add and Space cherry-picks still pass through)"
+            )
+        elif hot_mode_setting == "chat":
+            print(
+                "  hot=chat: dropping chats with no file-changing turn "
                 "(force-add and Space cherry-picks still pass through)"
             )
         if result[0]:

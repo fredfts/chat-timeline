@@ -26,7 +26,7 @@ PRECOMMIT_STATE_DEFAULT = {
     "enabled": False,
     "last_run_ts": 0,
     "tracked_chats": {},
-    "hot_only": False,
+    "hot_mode": "off",
 }
 
 

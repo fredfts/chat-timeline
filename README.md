@@ -72,7 +72,7 @@ Full flag reference: `timeline --help`.
 | `t` | cycle tracking mode (chat) or toggle exclude/force-add (entry). Hold 3s to clear tracking. |
 | `p` | toggle pre-commit auto mode |
 | `o` | toggle timeline archive rotation for this run |
-| `h` | toggle "hot entries only" filter |
+| `h` | cycle hot filter: off → chat (keep chats with any file-changing turn) → entry (keep only file-changing turns) |
 | `Tab` | switch list ↔ numeric input |
 | `Enter` | confirm · `Esc` cancel |
 

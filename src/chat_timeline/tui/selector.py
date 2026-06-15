@@ -98,7 +98,8 @@ def _render(
     hold_key=None,
     hold_elapsed=0.0,
     old_enabled=False,
-    hot_only=False,
+    hot_mode="off",
+    entry_cache=None,
 ):
     """Draw the selector UI in-place and return updated window_start."""
     total = len(chats)
@@ -121,7 +122,7 @@ def _render(
     pc_label = f" | pre-commit ON ({len(tracking_modes)} tracked)" if precommit_on else ""
     reset_label = " | -r mode" if reset_mode else ""
     old_label = " | rotate ON" if old_enabled else " | rotate off"
-    hot_label = " | hot ON" if hot_only else " | hot off"
+    hot_label = f" | hot {hot_mode}"
     lines.append(f"  selected {len(selected)}/{total}{pc_label}{reset_label}{old_label}{hot_label}")
 
     # Show current row info
@@ -190,10 +191,20 @@ def _render(
                 is_auto_skip = (
                     fp in auto_skip_fps.get(ci, set()) if e_mode == "tracked-checkpoint" else False
                 )
-                # When hot-only is on, cold turns are silently filtered by
-                # generate_timeline. Mirror that in the per-entry label so
+                # When the hot filter is on, cold turns are silently filtered
+                # by generate_timeline. Mirror that in the per-entry label so
                 # the TUI doesn't promise "+add" for entries that won't land.
-                is_cold = hot_only and not e.get("has_file_changes", True)
+                # "entry" judges each turn; "chat" marks every entry cold only
+                # when no turn in the chat touched a file.
+                if hot_mode == "entry":
+                    is_cold = not e.get("has_file_changes", True)
+                elif hot_mode == "chat":
+                    chat_entries = entry_cache.get(ci, []) if entry_cache else []
+                    is_cold = bool(chat_entries) and not any(
+                        en.get("has_file_changes", True) for en in chat_entries
+                    )
+                else:
+                    is_cold = False
                 if is_used:
                     trk_status = " +add" if is_forced else " used"
                 elif is_auto_skip:
@@ -231,7 +242,7 @@ def _render(
             "p pre-commit",
             "t track (●/◆)",
             "o rotate old",
-            "h hot entries only",
+            "h hot off/chat/entry",
         ]
         lines.append("  " + " | ".join(help_parts))
 
@@ -267,7 +278,7 @@ def _compute_explicit_select_fps(selected, selected_entries, entry_cache, reset_
 
     Only counts entries from chats the user expanded and cherry-picked.
     A chat selected without expansion is "implicit all" — those entries
-    are not explicit picks and do not bypass hot-only.
+    are not explicit picks and do not bypass the hot filter.
     """
     if reset_mode:
         return set()
@@ -370,7 +381,7 @@ def _removed_marker_is_active(td, chat, is_modified=False):
 def interactive_select(chats, exporters=None, reset_mode=False):
     """Keyboard-driven chat selector with entry expansion and tracking.
 
-    Returns (selected_indices, deselected_fps, old_enabled, hot_only,
+    Returns (selected_indices, deselected_fps, old_enabled, hot_mode,
              explicit_select_fps).
     """
     # Pipeline + state helpers — deferred so picking up tui.selector doesn't
@@ -381,6 +392,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
         _load_precommit_state,
         _save_precommit_state,
         _uninstall_hook,
+        next_hot_mode,
     )
     from chat_timeline.timeline import (
         _collect_archive_dedup_data,
@@ -391,7 +403,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
 
     total = len(chats)
     if total == 0:
-        return [], set(), False, False, set()
+        return [], set(), False, "off", set()
 
     os.system("")
     cursor = 0
@@ -409,7 +421,7 @@ def interactive_select(chats, exporters=None, reset_mode=False):
     # Pre-commit state
     pc_state = _load_precommit_state()
     precommit_on = pc_state.get("enabled", False)
-    hot_only = pc_state.get("hot_only", False)
+    hot_mode = pc_state.get("hot_mode", "off")
     since_ts = pc_state.get("last_run_ts", 0)
     modified_indices = _get_modified_chats(chats, since_ts) if precommit_on and since_ts > 0 else []
 
@@ -550,7 +562,8 @@ def interactive_select(chats, exporters=None, reset_mode=False):
             hold_key,
             hold_elapsed,
             old_enabled,
-            hot_only,
+            hot_mode,
+            entry_cache,
         )
         return rows
 
@@ -788,8 +801,8 @@ def interactive_select(chats, exporters=None, reset_mode=False):
             elif key == "o":
                 old_enabled = not old_enabled
             elif key == "h":
-                hot_only = not hot_only
-                pc_state["hot_only"] = hot_only
+                hot_mode = next_hot_mode(hot_mode)
+                pc_state["hot_mode"] = hot_mode
                 _save_precommit_state(pc_state)
             elif key == "\t":
                 input_mode = True
@@ -802,10 +815,10 @@ def interactive_select(chats, exporters=None, reset_mode=False):
                 explicit_fps = _compute_explicit_select_fps(
                     selected, selected_entries, entry_cache, reset_mode
                 )
-                return (sorted(selected), desel_fps, old_enabled, hot_only, explicit_fps)
+                return (sorted(selected), desel_fps, old_enabled, hot_mode, explicit_fps)
             elif key == "esc":
                 _save_tracking()
-                return [], set(), old_enabled, hot_only, set()
+                return [], set(), old_enabled, hot_mode, set()
 
             rows = _do_render()
     finally:
